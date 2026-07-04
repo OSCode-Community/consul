@@ -1,8 +1,10 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
 import Dropzone from '@/components/Dropzone';
 import UploadResult from '@/components/UploadResult';
+import { uploadImage, type UploadInput } from '@/lib/upload';
 import type { UploadItem } from '@/lib/types';
 
 export default function HomeUploader() {
@@ -18,72 +20,39 @@ export default function HomeUploader() {
     setItems((cur) => cur.map((it) => (it.id === id ? { ...it, ...changes } : it)));
   }, []);
 
-  const finish = useCallback(
-    async (id: string, res: Response) => {
-      const data = await res.json().catch(() => ({}) as Record<string, unknown>);
-      if (!res.ok) {
-        patch(id, {
-          status: 'error',
-          error: (data?.message as string) ?? `Upload failed (${res.status})`
-        });
-        return;
-      }
-      patch(id, {
+  // A single mutation drives every upload. `mutate()` can be called
+  // concurrently for multiple files; we thread each row's `id` through the
+  // mutation context so the lifecycle callbacks patch the right row instead of
+  // relying on the (single) latest mutation state.
+  const { mutate: upload } = useMutation({
+    mutationFn: uploadImage,
+    onMutate: (input: UploadInput) => {
+      const id = nextId();
+      prepend({
+        id,
+        name: rowName(input),
+        preview: rowPreview(input),
+        status: 'uploading'
+      });
+      return { id };
+    },
+    onSuccess: (data, _input, ctx) => {
+      patch(ctx.id, {
         status: 'done',
-        url: data.url as string,
-        preview: data.url as string,
-        width: data.width as number,
-        height: data.height as number,
-        bytes: data.bytes as number
+        url: data.url,
+        preview: data.url,
+        width: data.width,
+        height: data.height,
+        bytes: data.bytes
       });
     },
-    [patch]
-  );
+    onError: (err, _input, ctx) => {
+      if (ctx) patch(ctx.id, { status: 'error', error: err.message });
+    }
+  });
 
-  const handleFile = useCallback(
-    async (file: File) => {
-      const id = nextId();
-      prepend({
-        id,
-        name: file.name || 'pasted image',
-        preview: URL.createObjectURL(file),
-        status: 'uploading'
-      });
-      const fd = new FormData();
-      fd.append('file', file);
-      try {
-        await finish(id, await fetch('/api/upload', { method: 'POST', body: fd }));
-      } catch {
-        patch(id, { status: 'error', error: 'Network error' });
-      }
-    },
-    [prepend, finish, patch]
-  );
-
-  const handleUrl = useCallback(
-    async (url: string) => {
-      const id = nextId();
-      prepend({
-        id,
-        name: url.split('/').pop()?.split('?')[0] || 'linked image',
-        preview: url,
-        status: 'uploading'
-      });
-      try {
-        await finish(
-          id,
-          await fetch('/api/upload', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ imageUrl: url })
-          })
-        );
-      } catch {
-        patch(id, { status: 'error', error: 'Network error' });
-      }
-    },
-    [prepend, finish, patch]
-  );
+  const handleFile = useCallback((file: File) => upload({ kind: 'file', file }), [upload]);
+  const handleUrl = useCallback((url: string) => upload({ kind: 'url', url }), [upload]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
@@ -107,4 +76,13 @@ export default function HomeUploader() {
       </main>
     </div>
   );
+}
+
+function rowName(input: UploadInput): string {
+  if (input.kind === 'file') return input.file.name || 'pasted image';
+  return input.url.split('/').pop()?.split('?')[0] || 'linked image';
+}
+
+function rowPreview(input: UploadInput): string {
+  return input.kind === 'file' ? URL.createObjectURL(input.file) : input.url;
 }
