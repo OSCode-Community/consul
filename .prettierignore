@@ -1,0 +1,9 @@
+# Package managers
+pnpm-lock.yaml
+
+# Build output
+.next
+next-env.d.ts
+
+# Dependencies
+node_modules

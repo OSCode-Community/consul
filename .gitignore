@@ -1,0 +1,21 @@
+node_modules
+
+# Next.js
+/.next
+/out
+next-env.d.ts
+
+# Deploy
+.vercel
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.test
+
+*.code-workspace

@@ -1,0 +1,4 @@
+# sharp ships prebuilt native binaries and needs its install script approved
+# (pnpm 11 blocks dependency build scripts by default).
+allowBuilds:
+  sharp: true
