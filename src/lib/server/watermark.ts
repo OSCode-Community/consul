@@ -11,10 +11,17 @@ const WATERMARK_PATH = path.join(process.cwd(), 'src/assets/OSCode-Logo-White.sv
 
 /** Longest edge (width) the output image is capped to. */
 const MAX_WIDTH = 1920;
-/** Watermark width as a fraction of the image width, then clamped below. */
-const WIDTH_RATIO = 0.08;
+/** Watermark width as a fraction of the image's longest edge. */
+const WIDTH_RATIO = 0.1;
+/** Floor so the mark stays legible on small images. */
 const MIN_WATERMARK_W = 50;
-const MAX_WATERMARK_W = 200;
+/**
+ * Ceiling as a fraction of the actual image *width*, so the mark scales with the
+ * image yet can never be wider than the canvas — an overlay wider than the base
+ * makes sharp's composite throw. Replaces the old fixed 200px cap, which clipped
+ * the mark on large/portrait images.
+ */
+const MAX_WIDTH_RATIO = 0.25;
 /** Padding from the bottom and left edges, as a fraction of image width. */
 const PADDING_RATIO = 0.02;
 /** Watermark opacity (0–1). */
@@ -61,12 +68,19 @@ async function withOpacity(png: Buffer, opacity: number): Promise<Buffer> {
     .toBuffer();
 }
 
-/** Build the watermark overlay sized proportionally to a base image width. */
+/** Build the watermark overlay sized proportionally to the base image. */
 async function buildOverlay(
-  baseWidth: number
+  imageWidth: number,
+  imageHeight: number
 ): Promise<{ buffer: Buffer; width: number; height: number }> {
+  // Scale off the longest edge so tall/portrait images get a proportionate mark,
+  // then cap at a fraction of the width so the overlay always fits the canvas.
+  const longestEdge = Math.max(imageWidth, imageHeight);
   const targetW = Math.round(
-    Math.min(MAX_WATERMARK_W, Math.max(MIN_WATERMARK_W, baseWidth * WIDTH_RATIO))
+    Math.min(
+      imageWidth * MAX_WIDTH_RATIO,
+      Math.max(MIN_WATERMARK_W, longestEdge * WIDTH_RATIO)
+    )
   );
   const resized = await sharp(await loadWatermark(), { density: SVG_DENSITY })
     .resize({ width: targetW })
@@ -102,7 +116,7 @@ export async function watermarkToWebp(input: Buffer): Promise<WatermarkedImage> 
 
   let composited = resized;
   if (width > 0 && height > 0) {
-    const overlay = await buildOverlay(width);
+    const overlay = await buildOverlay(width, height);
     const pad = Math.round(width * PADDING_RATIO);
     const left = Math.max(0, Math.min(pad, width - overlay.width));
     const top = Math.max(0, height - overlay.height - pad);
