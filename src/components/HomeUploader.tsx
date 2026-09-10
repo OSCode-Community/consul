@@ -9,6 +9,8 @@ import type { UploadItem } from '@/lib/types';
 
 export default function HomeUploader() {
   const [items, setItems] = useState<UploadItem[]>([]);
+  const [watermark, setWatermark] = useState(true);
+  const [subfolder, setSubfolder] = useState('');
   const seq = useRef(0);
   const nextId = () => `${Date.now()}-${seq.current++}`;
 
@@ -51,8 +53,18 @@ export default function HomeUploader() {
     }
   });
 
-  const handleFile = useCallback((file: File) => upload({ kind: 'file', file }), [upload]);
-  const handleUrl = useCallback((url: string) => upload({ kind: 'url', url }), [upload]);
+  const uploadOptions = useCallback(
+    () => ({ watermark, subfolder: subfolder.trim() || undefined }),
+    [subfolder, watermark]
+  );
+  const handleFile = useCallback(
+    (file: File) => upload({ kind: 'file', file, ...uploadOptions() }),
+    [upload, uploadOptions]
+  );
+  const handleUrl = useCallback(
+    (url: string) => upload({ kind: 'url', url, ...uploadOptions() }),
+    [upload, uploadOptions]
+  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
@@ -60,9 +72,60 @@ export default function HomeUploader() {
         <header className="text-center">
           <h1 className="mb-[0.4rem] text-[1.9rem] font-bold">OSCode Image Uploader</h1>
           <p className="text-slate-400">
-            Drop an image anywhere — we stamp the OSCode watermark bottom-left and hand you a URL.
+            Upload images to S3 as WebP, with or without the OSCode watermark.
           </p>
         </header>
+
+        <section className="grid gap-4 rounded-2xl border border-slate-700 bg-slate-900 p-5 sm:grid-cols-[1fr_1fr]">
+          <fieldset>
+            <legend className="mb-2 text-sm font-semibold text-slate-200">Upload mode</legend>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                aria-pressed={watermark}
+                onClick={() => setWatermark(true)}
+                className={`cursor-pointer rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
+                  watermark
+                    ? 'bg-indigo-500 text-white'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                Add watermark
+              </button>
+              <button
+                type="button"
+                aria-pressed={!watermark}
+                onClick={() => setWatermark(false)}
+                className={`cursor-pointer rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
+                  !watermark
+                    ? 'bg-indigo-500 text-white'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                Direct upload
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-slate-400">
+              {watermark
+                ? 'Adds the logo and converts the image to WebP.'
+                : 'Uploads WebP unchanged; all other image formats are converted to WebP.'}
+            </p>
+          </fieldset>
+
+          <label className="block text-sm font-semibold text-slate-200">
+            S3 subfolder <span className="font-normal text-slate-500">(optional)</span>
+            <input
+              value={subfolder}
+              onChange={(event) => setSubfolder(event.target.value)}
+              placeholder="campaigns/september"
+              className="mt-2 block w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm font-normal text-slate-200 placeholder:text-slate-600 focus:border-indigo-500 focus:outline-none"
+            />
+            <span className="mt-2 block text-xs font-normal text-slate-400">
+              Stored below <code className="text-slate-300">osc/</code>. Use letters, numbers, dots,
+              underscores, hyphens, and slashes.
+            </span>
+          </label>
+        </section>
 
         <Dropzone onFile={handleFile} onUrl={handleUrl} />
 

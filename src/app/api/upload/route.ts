@@ -2,7 +2,7 @@ import { nanoid } from 'nanoid';
 import { NextResponse } from 'next/server';
 import { HttpError } from '@/lib/http';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '@/lib/server/env';
-import { convertHeicToJpeg } from '@/lib/server/image';
+import { convertHeicToJpeg, convertImageToWebp, inspectWebp } from '@/lib/server/image';
 import { fetchRemoteImage } from '@/lib/server/remote';
 import { publicUrl, upload } from '@/lib/server/s3';
 import { watermarkToWebp } from '@/lib/server/watermark';
@@ -12,17 +12,46 @@ import { watermarkToWebp } from '@/lib/server/watermark';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const ACCEPTED = new Set([
-  'image/jpeg',
-  'image/jpg',
-  'image/png',
-  'image/webp',
-  'image/avif',
-  'image/heic',
-  'image/heif'
-]);
-
 const normalizeType = (type: string) => type.split(';')[0].trim().toLowerCase();
+
+interface UploadOptions {
+  watermark: boolean;
+  subfolder: string;
+}
+
+function parseWatermark(value: unknown): boolean {
+  if (value === undefined || value === null || value === '') return true;
+  if (value === true || value === 'true') return true;
+  if (value === false || value === 'false') return false;
+  throw new HttpError(400, 'watermark must be true or false');
+}
+
+/**
+ * Permit nested folder names but reject traversal and characters that make the
+ * resulting CDN URL ambiguous. The upload namespace remains under `osc/`.
+ */
+function parseSubfolder(value: unknown): string {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string') throw new HttpError(400, 'subfolder must be a string');
+  const segments = value.trim().replaceAll('\\', '/').split('/').filter(Boolean);
+  if (
+    segments.length === 0 ||
+    segments.some(
+      (segment) =>
+        segment === '.' || segment === '..' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(segment)
+    )
+  ) {
+    throw new HttpError(
+      400,
+      'subfolder may contain letters, numbers, dots, underscores, hyphens, and nested slashes'
+    );
+  }
+  return segments.join('/');
+}
+
+function imageKey(subfolder: string): string {
+  return `osc/${subfolder ? `${subfolder}/` : ''}${nanoid()}.webp`;
+}
 
 export async function POST(request: Request) {
   try {
@@ -30,6 +59,7 @@ export async function POST(request: Request) {
     let input: Buffer;
     let mime: string;
     let sourceName = 'image';
+    let options: UploadOptions;
 
     if (contentType.includes('multipart/form-data')) {
       const form = await request.formData();
@@ -41,10 +71,18 @@ export async function POST(request: Request) {
       input = Buffer.from(await file.arrayBuffer());
       mime = normalizeType(file.type || '');
       sourceName = file.name || sourceName;
+      options = {
+        watermark: parseWatermark(form.get('watermark')),
+        subfolder: parseSubfolder(form.get('subfolder'))
+      };
       // Some browsers don't set a MIME type on drag/paste — fall back to extension.
       if (!mime && /\.(heic|heif)$/i.test(sourceName)) mime = 'image/heic';
     } else if (contentType.includes('application/json')) {
-      const body = (await request.json().catch(() => null)) as { imageUrl?: unknown } | null;
+      const body = (await request.json().catch(() => null)) as {
+        imageUrl?: unknown;
+        watermark?: unknown;
+        subfolder?: unknown;
+      } | null;
       const imageUrl = body?.imageUrl;
       if (typeof imageUrl !== 'string' || !imageUrl.trim())
         throw new HttpError(400, 'An imageUrl is required');
@@ -52,6 +90,10 @@ export async function POST(request: Request) {
       input = fetched.buffer;
       mime = fetched.contentType;
       sourceName = imageUrl.split('/').pop()?.split('?')[0] || sourceName;
+      options = {
+        watermark: parseWatermark(body?.watermark),
+        subfolder: parseSubfolder(body?.subfolder)
+      };
     } else {
       throw new HttpError(
         415,
@@ -59,7 +101,9 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!ACCEPTED.has(mime)) {
+    // MIME types are often missing or inaccurate for dragged files. The image
+    // decoder below is the final validation, but reject known non-image types.
+    if (mime && !mime.startsWith('image/')) {
       throw new HttpError(415, `Unsupported image type${mime ? `: ${mime}` : ''}`);
     }
 
@@ -73,13 +117,19 @@ export async function POST(request: Request) {
 
     let processed;
     try {
-      processed = await watermarkToWebp(input);
+      if (options.watermark) {
+        processed = await watermarkToWebp(input);
+      } else {
+        // Keep an already-WebP upload intact. Every other decodable image
+        // (PNG, JPEG, HEIC, AVIF, GIF, TIFF, etc.) is normalized to WebP.
+        processed = (await inspectWebp(input)) ?? (await convertImageToWebp(input));
+      }
     } catch (err) {
       console.error('Image processing failed', err);
       throw new HttpError(422, 'Could not process that image — is it a valid image file?');
     }
 
-    const key = `osc/${nanoid()}.webp`;
+    const key = imageKey(options.subfolder);
     try {
       await upload(key, processed.data, 'image/webp');
     } catch (err) {
