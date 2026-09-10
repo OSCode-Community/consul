@@ -77,10 +77,7 @@ async function buildOverlay(
   // then cap at a fraction of the width so the overlay always fits the canvas.
   const longestEdge = Math.max(imageWidth, imageHeight);
   const targetW = Math.round(
-    Math.min(
-      imageWidth * MAX_WIDTH_RATIO,
-      Math.max(MIN_WATERMARK_W, longestEdge * WIDTH_RATIO)
-    )
+    Math.min(imageWidth * MAX_WIDTH_RATIO, Math.max(MIN_WATERMARK_W, longestEdge * WIDTH_RATIO))
   );
   const resized = await sharp(await loadWatermark(), { density: SVG_DENSITY })
     .resize({ width: targetW })

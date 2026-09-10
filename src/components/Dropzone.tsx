@@ -161,7 +161,7 @@ export default function Dropzone({ onFile, onUrl }: Props) {
           aria-hidden="true"
         >
           <div className="rounded-2xl border-2 border-dashed border-indigo-500 bg-slate-900/90 px-10 py-6 text-xl font-bold text-slate-200">
-            Drop to watermark &amp; upload
+            Drop to upload
           </div>
         </div>
       )}

@@ -47,7 +47,7 @@ export default function UploadResult({ item }: Props) {
         </div>
 
         {item.status === 'uploading' ? (
-          <div className="text-[0.85rem] text-slate-400">Watermarking &amp; uploading…</div>
+          <div className="text-[0.85rem] text-slate-400">Processing &amp; uploading…</div>
         ) : item.status === 'error' ? (
           <div className="text-[0.85rem] text-red-400">{item.error ?? 'Upload failed'}</div>
         ) : item.status === 'done' && item.url ? (
